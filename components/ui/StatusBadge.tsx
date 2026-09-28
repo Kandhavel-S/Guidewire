@@ -13,11 +13,12 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   isSeverity = false,
   className,
 }) => {
+  const normalizedStatus = status || 'UNKNOWN';
   const colorClasses = isSeverity
-    ? getSeverityBadgeColor(status as Severity)
-    : getStatusBadgeColor(status);
+    ? getSeverityBadgeColor(normalizedStatus as Severity)
+    : getStatusBadgeColor(normalizedStatus);
 
-  const displayLabel = status.replace(/_/g, ' ');
+  const displayLabel = normalizedStatus.replace(/_/g, ' ');
 
   return (
     <span

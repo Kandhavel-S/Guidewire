@@ -37,7 +37,9 @@ export interface ExceptionAnalysisResponse {
 
 export interface AIInsight {
   title: string;
-  description: string;
+  finding: string;
+  impact: string;
+  recommendedAction: string;
   severity: 'INFO' | 'WARNING' | 'HIGH';
 }
 

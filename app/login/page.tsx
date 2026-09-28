@@ -9,8 +9,8 @@ export default function LoginPage() {
   const router = useRouter();
   const { login } = useAppStore();
 
-  const [email, setEmail] = useState('admin@insurance.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -31,11 +31,6 @@ export default function LoginPage() {
       setIsLoading(false);
       setError('Connection error. Please try again.');
     }
-  };
-
-  const fillQuickCreds = (userEmail: string, userPass: string) => {
-    setEmail(userEmail);
-    setPassword(userPass);
   };
 
   return (
@@ -158,30 +153,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick Preset Credentials */}
-          <div className="pt-6 border-t border-slate-800/80 space-y-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
-              Mock Demo Credentials (Click to Autofill):
-            </span>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => fillQuickCreds('admin@insurance.com', 'admin123')}
-                className="p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-800/60 text-left transition-colors text-xs"
-              >
-                <div className="font-semibold text-white">Admin Analyst</div>
-                <div className="text-slate-400 text-[11px] truncate">admin@insurance.com</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillQuickCreds('finance@insurance.com', 'finance123')}
-                className="p-3 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-800/60 text-left transition-colors text-xs"
-              >
-                <div className="font-semibold text-white">Finance Lead</div>
-                <div className="text-slate-400 text-[11px] truncate">finance@insurance.com</div>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

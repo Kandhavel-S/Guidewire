@@ -129,15 +129,33 @@ export default function ExceptionDetailPage() {
       await new Promise((res) => setTimeout(res, 300));
     }
 
-    const res = await aiApi.analyzeException(exc.id);
-    if (res.success && res.data?.analysis) {
-      const a = res.data.analysis;
+    try {
+      const res = await aiApi.analyzeException(exc.id);
+      if (res.success && res.data?.analysis) {
+        const a = res.data.analysis;
+        setAiAnalysis({
+          confidenceScore: a.confidence === 'HIGH' ? 95 : a.confidence === 'MEDIUM' ? 75 : 55,
+          likelyCause: a.likelyCause || a.summary,
+          financialImpact: a.financialImpact,
+          explanation: a.summary,
+          recommendedSteps: a.recommendedActions || [],
+        });
+      } else {
+        setAiAnalysis({
+          confidenceScore: 0,
+          likelyCause: 'Analysis unavailable',
+          financialImpact: 'Unable to determine',
+          explanation: res.error || 'The AI analysis service returned an unexpected response. Please try again.',
+          recommendedSteps: [],
+        });
+      }
+    } catch (error) {
       setAiAnalysis({
-        confidenceScore: a.confidence === 'HIGH' ? 95 : a.confidence === 'MEDIUM' ? 75 : 55,
-        likelyCause: a.likelyCause || a.summary,
-        financialImpact: a.financialImpact,
-        explanation: a.summary,
-        recommendedSteps: a.recommendedActions || [],
+        confidenceScore: 0,
+        likelyCause: 'Analysis failed',
+        financialImpact: 'Unable to determine',
+        explanation: 'Failed to connect to the AI analysis service. Please check your connection and try again.',
+        recommendedSteps: [],
       });
     }
     setIsAnalyzing(false);
@@ -146,8 +164,12 @@ export default function ExceptionDetailPage() {
   // AI Summary Handler
   const handleGenerateSummary = async () => {
     setIsGeneratingSummary(true);
-    const res = await aiApi.generateSummary(exc.id);
-    setAiSummary(res.data?.summary || 'Summary unavailable.');
+    try {
+      const res = await aiApi.generateSummary(exc.id);
+      setAiSummary(res.data?.summary || 'Summary unavailable.');
+    } catch {
+      setAiSummary('Failed to generate summary. Please try again.');
+    }
     setIsGeneratingSummary(false);
   };
 

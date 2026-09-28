@@ -425,10 +425,16 @@ export async function getDashboardInsights(_req: AuthRequest, res: Response): Pr
   };
 
   const INSIGHTS_SYSTEM = `You are an insurance analytics AI. Generate strategic insights from aggregated reconciliation statistics.
-Return a JSON object: { "insights": [{"title": "...", "description": "...", "severity": "INFO|WARNING|HIGH"}] }
+Return a JSON object: { "insights": [{"title": "...", "finding": "...", "impact": "...", "recommendedAction": "...", "severity": "INFO|WARNING|HIGH"}] }
 Generate 3-5 actionable insights. Be specific, reference the numbers provided.`;
 
-  let insights: Array<{ title: string; description: string; severity: string }>;
+  let insights: Array<{
+    title: string;
+    finding: string;
+    impact: string;
+    recommendedAction: string;
+    severity: 'INFO' | 'WARNING' | 'HIGH';
+  }>;
 
   try {
     const aiResponse = await callAI(
@@ -445,7 +451,9 @@ Generate 3-5 actionable insights. Be specific, reference the numbers provided.`;
     if (underpayments._count._all > 0) {
       insights.push({
         title: 'Underpayments Dominating Outstanding Deficit',
-        description: `${underpayments._count._all} open underpayment exceptions totaling ₹${underpaymentTotal.toLocaleString('en-IN')}. Immediate collection action recommended.`,
+        finding: `${underpayments._count._all} open underpayment exceptions are contributing to the outstanding deficit.`,
+        impact: `₹${underpaymentTotal.toLocaleString('en-IN')} remains tied to underpayment cases.`,
+        recommendedAction: 'Prioritize collection follow-up and verify whether split payments exist.',
         severity: 'HIGH',
       });
     }
@@ -453,7 +461,9 @@ Generate 3-5 actionable insights. Be specific, reference the numbers provided.`;
     if (criticals > 0) {
       insights.push({
         title: `${criticals} Critical Exceptions Require Immediate Triage`,
-        description: `Critical discrepancies exceeding ₹50,000 have been flagged and require senior analyst review.`,
+        finding: `${criticals} unresolved exceptions exceed the critical severity threshold.`,
+        impact: 'These cases represent a high risk of financial leakage or delayed reconciliation.',
+        recommendedAction: 'Assign the cases to a senior finance analyst for immediate review.',
         severity: 'HIGH',
       });
     }
@@ -461,14 +471,18 @@ Generate 3-5 actionable insights. Be specific, reference the numbers provided.`;
     if (failedPayments > 0) {
       insights.push({
         title: 'Payment Gateway Failures Detected',
-        description: `${failedPayments} payment attempts failed. Gateway integration and customer mandate verification recommended.`,
+        finding: `${failedPayments} payment attempts were recorded with a failed status.`,
+        impact: 'Failed collections may increase outstanding balances and policy servicing risk.',
+        recommendedAction: 'Verify gateway connectivity and customer mandate status before retrying.',
         severity: 'WARNING',
       });
     }
 
     insights.push({
       title: `Reconciliation Rate: ${reconciliationRate}%`,
-      description: `Current reconciliation accuracy is ${reconciliationRate}%. Target is 95%+ for clean ledger maintenance.`,
+      finding: `The current reconciliation rate is ${reconciliationRate}%.`,
+      impact: 'A rate below the 95% target indicates unresolved differences in the ledger.',
+      recommendedAction: 'Review the highest-value unmatched records and resolve their exceptions.',
       severity: parseFloat(reconciliationRate) >= 90 ? 'INFO' : 'WARNING',
     });
   }

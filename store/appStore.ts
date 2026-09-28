@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   User,
   Policy,
+  Policyholder,
   Invoice,
   Payment,
   PaymentException,
@@ -15,6 +16,35 @@ import { invoicesApi } from '@/lib/api/invoices';
 import { paymentsApi } from '@/lib/api/payments';
 import { exceptionsApi } from '@/lib/api/exceptions';
 import { reconciliationApi } from '@/lib/api/reconciliation';
+
+type ApiPolicy = Partial<Policy> & {
+  policyholder?: Policyholder;
+  policyType?: string;
+  premiumAmount?: number | string;
+};
+
+function normalizePolicy(policy: ApiPolicy): Policy {
+  const premiumAmount = Number(policy.premiumAmount ?? policy.annualPremium ?? 0);
+  const billingFrequency = policy.billingFrequency ?? 'Annual';
+  const customer = policy.customer ?? policy.policyholder ?? {
+    id: '',
+    name: 'Unknown customer',
+    email: '',
+    phone: '',
+    address: '',
+  };
+
+  return {
+    ...policy,
+    customer,
+    productType: (policy.productType ?? policy.policyType ?? 'Unknown') as Policy['productType'],
+    annualPremium: Number(policy.annualPremium ?? premiumAmount),
+    monthlyPremium: Number(
+      policy.monthlyPremium ?? (billingFrequency === 'Monthly' ? premiumAmount : premiumAmount / 12)
+    ),
+    billingFrequency,
+  } as Policy;
+}
 
 export const DEFAULT_SETTINGS: SystemSettings = {
   theme: 'dark',
@@ -78,7 +108,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       set({
         currentUser,
-        policies: polRes.data || [],
+        policies: (polRes.data || []).map(normalizePolicy),
         invoices: invRes.data || [],
         payments: payRes.data || [],
         exceptions: excRes.data || [],
@@ -102,7 +132,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ]);
 
       set({
-        policies: polRes.data || [],
+        policies: (polRes.data || []).map(normalizePolicy),
         invoices: invRes.data || [],
         payments: payRes.data || [],
         exceptions: excRes.data || [],

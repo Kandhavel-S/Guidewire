@@ -1,48 +1,52 @@
 'use client';
 
-import React from 'react';
-import Link from 'next/link';
-import { Sparkles, ArrowRight, ShieldAlert, TrendingDown, DollarSign, Zap } from 'lucide-react';
-import { useAppStore } from '@/store/appStore';
-import { formatINR } from '@/lib/utils';
+import React, { useEffect, useState } from 'react';
+import { Sparkles, ShieldAlert, RefreshCw, AlertCircle, CircleAlert, Lightbulb } from 'lucide-react';
+import { aiApi } from '@/lib/api/ai';
+
+interface AIInsight {
+  title: string;
+  description?: string;
+  finding?: string;
+  impact?: string;
+  recommendedAction?: string;
+  severity: 'INFO' | 'WARNING' | 'HIGH' | string;
+}
+
+function normalizeInsight(insight: AIInsight): AIInsight {
+  return {
+    ...insight,
+    finding: insight.finding || insight.description || 'No finding provided.',
+    impact: insight.impact || 'Impact was not specified by the AI response.',
+    recommendedAction: insight.recommendedAction || 'Review this finding and determine the next action.',
+  };
+}
 
 export default function AIInsightsPage() {
-  const { exceptions, invoices, payments } = useAppStore();
+  const [insights, setInsights] = useState<AIInsight[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const totalOutstanding = Math.max(
-    0,
-    invoices.reduce((sum, i) => sum + (Number(i.expectedAmount) || 0) - (Number(i.paidAmount) || 0), 0)
-  );
+  const loadInsights = async () => {
+    setIsLoading(true);
+    setError(null);
 
-  const insights = [
-    {
-      id: 'ins-1',
-      category: 'FINANCIAL',
-      title: 'Underpayments Dominating Deficit',
-      description: `${exceptions.filter((e) => e.type === 'UNDERPAYMENT').length} open underpayment cases identified. Total outstanding balance requires manual follow-up.`,
-      impactAmount: totalOutstanding,
-      affectedCount: exceptions.filter((e) => e.type === 'UNDERPAYMENT').length,
-      suggestedAction: 'Trigger auto-dunning reminders for open underpayments.',
-    },
-    {
-      id: 'ins-2',
-      category: 'EXCEPTION',
-      title: 'Critical Discrepancies Requiring Immediate Action',
-      description: `${exceptions.filter((e) => e.severity === 'CRITICAL').length} critical severity exceptions exceeding ₹50,000 threshold flagged.`,
-      impactAmount: 120000,
-      affectedCount: exceptions.filter((e) => e.severity === 'CRITICAL').length,
-      suggestedAction: 'Assign directly to Senior Finance Analyst.',
-    },
-    {
-      id: 'ins-3',
-      category: 'PAYMENT_BEHAVIOR',
-      title: 'Payment Gateway Failure Trend',
-      description: `${payments.filter((p: any) => p.status === 'FAILED' || p.status === 'Failed').length} payment gateway transactions failed in recent cycles.`,
-      impactAmount: 35000,
-      affectedCount: payments.filter((p: any) => p.status === 'FAILED' || p.status === 'Failed').length,
-      suggestedAction: 'Verify Mandate & Bank Gateway Connectivity.',
-    },
-  ];
+    try {
+      const response = await aiApi.getDashboardInsights();
+      if (!response.success) {
+        throw new Error(response.error || 'Unable to load AI insights.');
+      }
+      setInsights((response.data?.insights || []).map(normalizeInsight));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load AI insights.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadInsights();
+  }, []);
 
   return (
     <div className="space-y-8">
@@ -63,114 +67,72 @@ export default function AIInsightsPage() {
         </div>
       </div>
 
-      {/* Highlights Cards Section */}
-      <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-          <Zap className="w-4 h-4 text-purple-400" /> Strategic AI Findings & Impact Analysis
+          <ShieldAlert className="w-4 h-4 text-purple-400" /> Live AI Findings
         </h2>
+        <button
+          onClick={() => void loadInsights()}
+          disabled={isLoading}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
 
+      {isLoading && (
+        <div className="p-8 text-center text-sm text-slate-400">Generating insights from current reconciliation data...</div>
+      )}
+
+      {error && (
+        <div className="p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-sm text-red-300 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" /> {error}
+        </div>
+      )}
+
+      {!isLoading && !error && insights.length === 0 && (
+        <div className="p-8 text-center text-sm text-slate-400">No AI insights were returned.</div>
+      )}
+
+      {!isLoading && !error && insights.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {insights.map((ins) => (
+          {insights.map((insight, index) => (
             <div
-              key={ins.id}
-              className="p-6 rounded-xl border border-purple-500/20 bg-white dark:bg-slate-900 shadow-md space-y-4 hover:border-purple-500/40 transition-all relative overflow-hidden"
+              key={`${insight.title}-${index}`}
+              className="p-6 rounded-xl border border-purple-500/20 bg-white dark:bg-slate-900 shadow-md space-y-4"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="p-2 rounded-lg bg-purple-500/10 text-purple-400 font-bold text-xs">
-                    ✨ Key Finding
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                    {ins.category.replace('_', ' ')}
-                  </span>
-                </div>
-
-                {ins.impactAmount && (
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 font-medium">Financial Impact</span>
-                    <div className="text-lg font-extrabold text-red-400">
-                      {formatINR(ins.impactAmount)}
-                    </div>
-                  </div>
-                )}
+              <div className="flex items-center justify-between gap-3">
+                <span className="p-2 rounded-lg bg-purple-500/10 text-purple-400 font-bold text-xs">AI Finding</span>
+                <span className="text-[10px] font-semibold uppercase px-2 py-1 rounded bg-slate-800 text-slate-300">
+                  {insight.severity}
+                </span>
               </div>
-
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                  {ins.title}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  {ins.description}
-                </p>
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">{insight.title}</h3>
               </div>
 
-              {ins.affectedCount && (
-                <div className="text-xs text-slate-400 font-semibold flex items-center gap-1.5">
-                  <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Affected Invoices / Cases: <strong>{ins.affectedCount}</strong></span>
+              <div className="grid gap-3 text-xs">
+                <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3">
+                  <div className="flex items-center gap-2 font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    <CircleAlert className="w-3.5 h-3.5 text-amber-500" /> Finding
+                  </div>
+                  <p className="mt-1 leading-relaxed text-slate-700 dark:text-slate-300">{insight.finding}</p>
                 </div>
-              )}
-
-              {ins.suggestedAction && (
-                <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20 text-xs text-purple-300 font-medium">
-                  <strong>Recommended Action:</strong> {ins.suggestedAction}
+                <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3">
+                  <div className="font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Impact</div>
+                  <p className="mt-1 leading-relaxed text-slate-700 dark:text-slate-300">{insight.impact}</p>
                 </div>
-              )}
+                <div className="rounded-lg border border-purple-500/20 bg-purple-500/10 p-3">
+                  <div className="flex items-center gap-2 font-bold uppercase tracking-wide text-purple-300">
+                    <Lightbulb className="w-3.5 h-3.5" /> Recommended Action
+                  </div>
+                  <p className="mt-1 leading-relaxed text-purple-100">{insight.recommendedAction}</p>
+                </div>
+              </div>
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Categorized AI Section Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Financial Insights Panel */}
-        <div className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
-            <DollarSign className="w-4 h-4 text-emerald-500" /> Financial Discrepancy Trends
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Underpayments represent the largest aggregate dollar deficit. Commercial Property line of business exhibits highest variance due to split installment remittances.
-          </p>
-          <Link
-            href="/reconciliation"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400 hover:underline"
-          >
-            Review Reconciliation Engine <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-
-        {/* Exception Insights Panel */}
-        <div className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-amber-500" /> Operational Queue Triage
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            High-severity cases exceeding ₹50,000 threshold have been prioritized and auto-assigned to Senior Analysts for fast-track clearance.
-          </p>
-          <Link
-            href="/exceptions"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400 hover:underline"
-          >
-            View Operational Command Center <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-
-        {/* Payment Behavior Panel */}
-        <div className="p-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
-            <TrendingDown className="w-4 h-4 text-purple-500" /> Payment Gateway Diagnostics
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Gateway timeouts and NACH mandate revocations caused a 4.2% increase in failed payment attempts in recent reconciliation cycles.
-          </p>
-          <Link
-            href="/payments"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400 hover:underline"
-          >
-            Inspect Gateway Transactions <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
