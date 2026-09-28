@@ -1,0 +1,495 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.analyzeException = analyzeException;
+exports.generateSummary = generateSummary;
+exports.chatWithAI = chatWithAI;
+exports.getDashboardInsights = getDashboardInsights;
+exports.naturalLanguageSearch = naturalLanguageSearch;
+const database_1 = require("../../config/database");
+const response_1 = require("../../utils/response");
+const ai_service_1 = require("./ai.service");
+const EXCEPTION_ANALYSIS_SYSTEM = `You are an insurance payment reconciliation assistant for InsureFlow.
+Analyze the provided payment exception and return a JSON object with these exact fields:
+{
+  "summary": "One-sentence summary",
+  "likelyCause": "The most probable root cause",
+  "financialImpact": "Financial impact statement",
+  "evidence": ["Evidence point 1", "Evidence point 2"],
+  "recommendedActions": ["Action 1", "Action 2", "Action 3"],
+  "confidence": "HIGH|MEDIUM|LOW"
+}
+Rules:
+- Only use data provided. Never invent facts.
+- Clearly distinguish confirmed facts from possible explanations.
+- Return concise, professional output suitable for a finance analyst.
+- confidence must be HIGH, MEDIUM, or LOW.`;
+async function analyzeException(req, res) {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const exception = await database_1.prisma.paymentException.findFirst({
+        where: { OR: [{ id }, { exceptionNumber: id }] },
+        include: {
+            policy: { include: { policyholder: true } },
+            invoice: true,
+            payment: true,
+            notes: {
+                orderBy: { createdAt: 'desc' },
+                take: 3,
+                include: { user: { select: { name: true } } },
+            },
+        },
+    });
+    if (!exception) {
+        (0, response_1.sendError)(res, 'Exception not found', 404, 'EXCEPTION_NOT_FOUND');
+        return;
+    }
+    const exc = exception;
+    // Check for cached recent analysis (within 30 minutes if data unchanged)
+    const recentAnalysis = await database_1.prisma.aIAnalysis.findFirst({
+        where: {
+            exceptionId: exc.id,
+            analysisType: 'EXCEPTION_ANALYSIS',
+            createdAt: { gte: new Date(Date.now() - 30 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+    });
+    if (recentAnalysis && exc.updatedAt < recentAnalysis.createdAt) {
+        (0, response_1.sendSuccess)(res, {
+            analysis: recentAnalysis.response,
+            cached: true,
+            model: recentAnalysis.model,
+        });
+        return;
+    }
+    const exceptionContext = {
+        type: exc.type,
+        expectedAmount: Number(exc.expectedAmount),
+        actualAmount: Number(exc.actualAmount),
+        difference: Number(exc.difference),
+        customerName: exc.policy.policyholder.name,
+        policyNumber: exc.policy.policyNumber,
+        policyType: exc.policy.policyType,
+        invoiceNumber: exc.invoice.invoiceNumber,
+        invoiceDueDate: exc.invoice.dueDate.toISOString(),
+        paymentMethod: exc.payment?.paymentMethod || 'N/A',
+        transactionId: exc.payment?.transactionId || 'N/A',
+        severity: exc.severity,
+        status: exc.status,
+        notes: exc.notes.map((n) => `${n.user.name}: ${n.content}`),
+    };
+    let analysis;
+    let model = ai_service_1.AI_MODEL;
+    try {
+        const prompt = `Analyze this payment exception:\n${JSON.stringify(exceptionContext, null, 2)}`;
+        const aiResponse = await (0, ai_service_1.callAI)(EXCEPTION_ANALYSIS_SYSTEM, prompt, true);
+        analysis = JSON.parse(aiResponse);
+    }
+    catch (error) {
+        if (error.message === 'AI_UNAVAILABLE') {
+            analysis = (0, ai_service_1.generateFallbackAnalysis)(exceptionContext);
+            model = 'fallback-deterministic';
+        }
+        else {
+            console.error('[AI] Analysis error:', error);
+            analysis = (0, ai_service_1.generateFallbackAnalysis)(exceptionContext);
+            model = 'fallback-deterministic';
+        }
+    }
+    // Save the analysis
+    const saved = await database_1.prisma.aIAnalysis.create({
+        data: {
+            exceptionId: exc.id,
+            analysisType: 'EXCEPTION_ANALYSIS',
+            prompt: JSON.stringify(exceptionContext),
+            response: analysis,
+            model,
+        },
+    });
+    // Add timeline event
+    await database_1.prisma.exceptionTimelineEvent.create({
+        data: {
+            exceptionId: exc.id,
+            userId: req.user?.id,
+            eventType: 'AI_ANALYSIS',
+            description: `AI exception analysis completed. Confidence: ${analysis.confidence}`,
+        },
+    });
+    // Audit log
+    await database_1.prisma.auditLog.create({
+        data: {
+            userId: req.user?.id,
+            action: 'AI_ANALYSIS',
+            entityType: 'PaymentException',
+            entityId: exc.id,
+            newValue: { analysisId: saved.id, model },
+        },
+    });
+    (0, response_1.sendSuccess)(res, { analysis, cached: false, model });
+}
+const SUMMARY_SYSTEM = `You are an insurance reconciliation analyst. Generate a concise investigation summary.
+Return plain text (not JSON). Include: case overview, key facts, investigation notes summary, and recommendation.
+Keep it under 300 words. Professional tone.`;
+async function generateSummary(req, res) {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const exception = await database_1.prisma.paymentException.findFirst({
+        where: { OR: [{ id }, { exceptionNumber: id }] },
+        include: {
+            policy: { include: { policyholder: true } },
+            invoice: true,
+            payment: true,
+            notes: {
+                orderBy: { createdAt: 'desc' },
+                include: { user: { select: { name: true } } },
+            },
+            timeline: { orderBy: { createdAt: 'asc' } },
+            assignedTo: { select: { name: true } },
+        },
+    });
+    if (!exception) {
+        (0, response_1.sendError)(res, 'Exception not found', 404, 'EXCEPTION_NOT_FOUND');
+        return;
+    }
+    const exc = exception;
+    const notesText = exc.notes.length
+        ? exc.notes.map((n) => `- ${n.user.name}: ${n.content}`).join('\n')
+        : 'No investigation notes added yet.';
+    const context = `
+Exception: ${exc.exceptionNumber} | Type: ${exc.type} | Severity: ${exc.severity}
+Policy: ${exc.policy.policyNumber} (${exc.policy.policyType})
+Customer: ${exc.policy.policyholder.name}
+Invoice: ${exc.invoice.invoiceNumber} | Due: ${exc.invoice.dueDate.toISOString()}
+Expected: ₹${Number(exc.expectedAmount).toLocaleString('en-IN')}
+Actual: ₹${Number(exc.actualAmount).toLocaleString('en-IN')}
+Difference: ₹${Number(exc.difference).toLocaleString('en-IN')}
+Status: ${exc.status} | Assigned to: ${exc.assignedTo?.name || 'Unassigned'}
+
+Investigation Notes:
+${notesText}
+  `.trim();
+    let summary;
+    try {
+        summary = await (0, ai_service_1.callAI)(SUMMARY_SYSTEM, context, false);
+    }
+    catch {
+        // Fallback deterministic summary
+        summary = `### Investigation Summary — ${exc.exceptionNumber}
+
+**Policy:** ${exc.policy.policyNumber} (${exc.policy.policyholder.name})
+**Issue:** ${exc.type.replace(/_/g, ' ')} | **Severity:** ${exc.severity}
+**Expected:** ₹${Number(exc.expectedAmount).toLocaleString('en-IN')} | **Actual:** ₹${Number(exc.actualAmount).toLocaleString('en-IN')} | **Difference:** ₹${Number(exc.difference).toLocaleString('en-IN')}
+
+**Current Status:** ${exc.status} (Assigned to: ${exc.assignedTo?.name || 'Unassigned'})
+
+**Investigation Notes:**
+${notesText}
+
+**Recommendation:** Verify bank credit statements and confirm resolution steps before closing this exception.`;
+    }
+    // Save analysis
+    await database_1.prisma.aIAnalysis.create({
+        data: {
+            exceptionId: exc.id,
+            analysisType: 'INVESTIGATION_SUMMARY',
+            prompt: context,
+            response: { summary },
+            model: ai_service_1.AI_MODEL,
+        },
+    });
+    (0, response_1.sendSuccess)(res, { summary });
+}
+const CHAT_SYSTEM = `You are the InsureFlow AI Investigation Assistant.
+You help finance analysts and operations teams investigate insurance payment exceptions.
+Rules:
+- Only discuss the current exception context provided.
+- Never invent policy information or fabricate payment details.
+- If information is unavailable, clearly state that.
+- Provide concise, professional answers (max 150 words).
+- Do not make financial or legal decisions on behalf of the company.`;
+async function chatWithAI(req, res) {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { message } = req.body;
+    if (!message?.trim()) {
+        (0, response_1.sendError)(res, 'Message is required', 400, 'VALIDATION_ERROR');
+        return;
+    }
+    const exception = await database_1.prisma.paymentException.findFirst({
+        where: { OR: [{ id }, { exceptionNumber: id }] },
+        include: {
+            policy: { include: { policyholder: true } },
+            invoice: true,
+            payment: true,
+        },
+    });
+    if (!exception) {
+        (0, response_1.sendError)(res, 'Exception not found', 404, 'EXCEPTION_NOT_FOUND');
+        return;
+    }
+    const exc = exception;
+    // Get or create conversation
+    let conversation = await database_1.prisma.aIConversation.findFirst({
+        where: {
+            exceptionId: exc.id,
+            userId: req.user.id,
+        },
+        include: {
+            messages: {
+                orderBy: { createdAt: 'asc' },
+                take: 10, // Last 10 messages for context
+            },
+        },
+    });
+    if (!conversation) {
+        conversation = await database_1.prisma.aIConversation.create({
+            data: {
+                exceptionId: exc.id,
+                userId: req.user.id,
+            },
+            include: { messages: true },
+        });
+    }
+    // Save user message
+    await database_1.prisma.aIMessage.create({
+        data: {
+            conversationId: conversation.id,
+            role: 'USER',
+            content: message.trim(),
+        },
+    });
+    const exceptionContext = `
+Current Exception Context:
+- Exception: ${exc.exceptionNumber} | Type: ${exc.type.replace(/_/g, ' ')}
+- Policy: ${exc.policy.policyNumber} (${exc.policy.policyType})
+- Customer: ${exc.policy.policyholder.name}
+- Invoice: ${exc.invoice.invoiceNumber} | Due: ${exc.invoice.dueDate.toISOString()}
+- Expected: ₹${Number(exc.expectedAmount).toLocaleString('en-IN')}
+- Actual: ₹${Number(exc.actualAmount).toLocaleString('en-IN')}
+- Difference: ₹${Number(exc.difference).toLocaleString('en-IN')}
+- Transaction: ${exc.payment?.transactionId || 'N/A'}
+- Payment Method: ${exc.payment?.paymentMethod || 'N/A'}
+  `.trim();
+    // Build conversation history
+    const history = conversation.messages.map((m) => ({
+        role: m.role === 'USER' ? 'user' : 'assistant',
+        content: m.content,
+    }));
+    let aiResponse;
+    try {
+        const aiClient = (await Promise.resolve().then(() => __importStar(require('./ai.service')))).getAIClient();
+        if (!aiClient)
+            throw new Error('AI_UNAVAILABLE');
+        const messages = [
+            { role: 'system', content: `${CHAT_SYSTEM}\n\n${exceptionContext}` },
+            ...history,
+            { role: 'user', content: message.trim() },
+        ];
+        const response = await aiClient.chat.completions.create({
+            model: ai_service_1.AI_MODEL,
+            messages,
+            temperature: 0.4,
+        });
+        aiResponse = response.choices[0]?.message?.content || 'I could not generate a response.';
+    }
+    catch {
+        // Deterministic fallback chat
+        const q = message.toLowerCase();
+        if (q.includes('why') || q.includes('flagged') || q.includes('reason')) {
+            aiResponse = `This exception (${exc.exceptionNumber}) was flagged because the payment amount received did not match the expected invoice amount. The type is ${exc.type.replace(/_/g, ' ')} with a difference of ₹${Number(exc.difference).toLocaleString('en-IN')}.`;
+        }
+        else if (q.includes('investigate') || q.includes('first') || q.includes('step')) {
+            aiResponse = `Start by checking the payment gateway transaction reference (${exc.payment?.transactionId || 'N/A'}) in BillingCenter logs, then verify if customer ${exc.policy.policyholder.name} made any split payments.`;
+        }
+        else if (q.includes('resolv') || q.includes('close')) {
+            aiResponse = `To resolve: ensure all investigation notes are logged, verify the accounting ledger is updated, then click "Resolve Exception" to mark it as RESOLVED.`;
+        }
+        else {
+            aiResponse = `Exception ${exc.exceptionNumber}: Expected ₹${Number(exc.expectedAmount).toLocaleString('en-IN')}, Received ₹${Number(exc.actualAmount).toLocaleString('en-IN')}, Difference ₹${Number(exc.difference).toLocaleString('en-IN')}. Type: ${exc.type.replace(/_/g, ' ')}. Please check gateway logs for more details.`;
+        }
+    }
+    // Save AI response
+    await database_1.prisma.aIMessage.create({
+        data: {
+            conversationId: conversation.id,
+            role: 'ASSISTANT',
+            content: aiResponse,
+        },
+    });
+    (0, response_1.sendSuccess)(res, {
+        message: aiResponse,
+        conversationId: conversation.id,
+    });
+}
+async function getDashboardInsights(_req, res) {
+    // Gather aggregate stats from database
+    const [openExceptions, underpayments, criticals, failedPayments, invoiceAgg, paymentAgg, exceptionByType,] = await Promise.all([
+        database_1.prisma.paymentException.count({ where: { status: { not: 'RESOLVED' } } }),
+        database_1.prisma.paymentException.aggregate({
+            where: { type: 'UNDERPAYMENT', status: { not: 'RESOLVED' } },
+            _count: { _all: true },
+            _sum: { difference: true },
+        }),
+        database_1.prisma.paymentException.count({
+            where: { severity: 'CRITICAL', status: { not: 'RESOLVED' } },
+        }),
+        database_1.prisma.payment.count({ where: { status: 'FAILED' } }),
+        database_1.prisma.invoice.aggregate({
+            where: { status: { not: 'CANCELLED' } },
+            _sum: { totalAmount: true },
+        }),
+        database_1.prisma.payment.aggregate({
+            where: { status: 'SUCCESS' },
+            _sum: { amount: true },
+        }),
+        database_1.prisma.paymentException.groupBy({
+            by: ['type'],
+            _count: { _all: true },
+        }),
+    ]);
+    const totalExpected = Number(invoiceAgg._sum.totalAmount || 0);
+    const totalReceived = Number(paymentAgg._sum.amount || 0);
+    const underpaymentTotal = Number(underpayments._sum.difference || 0);
+    const reconciliationRate = totalExpected > 0 ? ((totalReceived / totalExpected) * 100).toFixed(1) : '0.0';
+    const statsContext = {
+        openExceptions,
+        criticalExceptions: criticals,
+        failedPayments,
+        underpaymentTotal,
+        underpaymentCount: underpayments._count._all,
+        totalExpected,
+        totalReceived,
+        outstandingAmount: Math.max(0, totalExpected - totalReceived),
+        reconciliationRate: parseFloat(reconciliationRate),
+        exceptionsByType: exceptionByType,
+    };
+    const INSIGHTS_SYSTEM = `You are an insurance analytics AI. Generate strategic insights from aggregated reconciliation statistics.
+Return a JSON object: { "insights": [{"title": "...", "description": "...", "severity": "INFO|WARNING|HIGH"}] }
+Generate 3-5 actionable insights. Be specific, reference the numbers provided.`;
+    let insights;
+    try {
+        const aiResponse = await (0, ai_service_1.callAI)(INSIGHTS_SYSTEM, `Reconciliation Statistics:\n${JSON.stringify(statsContext, null, 2)}`, true);
+        const parsed = JSON.parse(aiResponse);
+        insights = parsed.insights;
+    }
+    catch {
+        // Fallback deterministic insights
+        insights = [];
+        if (underpayments._count._all > 0) {
+            insights.push({
+                title: 'Underpayments Dominating Outstanding Deficit',
+                description: `${underpayments._count._all} open underpayment exceptions totaling ₹${underpaymentTotal.toLocaleString('en-IN')}. Immediate collection action recommended.`,
+                severity: 'HIGH',
+            });
+        }
+        if (criticals > 0) {
+            insights.push({
+                title: `${criticals} Critical Exceptions Require Immediate Triage`,
+                description: `Critical discrepancies exceeding ₹50,000 have been flagged and require senior analyst review.`,
+                severity: 'HIGH',
+            });
+        }
+        if (failedPayments > 0) {
+            insights.push({
+                title: 'Payment Gateway Failures Detected',
+                description: `${failedPayments} payment attempts failed. Gateway integration and customer mandate verification recommended.`,
+                severity: 'WARNING',
+            });
+        }
+        insights.push({
+            title: `Reconciliation Rate: ${reconciliationRate}%`,
+            description: `Current reconciliation accuracy is ${reconciliationRate}%. Target is 95%+ for clean ledger maintenance.`,
+            severity: parseFloat(reconciliationRate) >= 90 ? 'INFO' : 'WARNING',
+        });
+    }
+    (0, response_1.sendSuccess)(res, { insights, stats: statsContext });
+}
+async function naturalLanguageSearch(req, res) {
+    const { query } = req.body;
+    if (!query?.trim()) {
+        (0, response_1.sendError)(res, 'Search query is required', 400, 'VALIDATION_ERROR');
+        return;
+    }
+    const SEARCH_SYSTEM = `You are a search query parser for an insurance reconciliation system.
+Convert the natural language query into structured filters.
+Return ONLY this JSON structure:
+{
+  "entity": "exceptions|policies|invoices|payments",
+  "filters": {
+    "status": [],
+    "type": [],
+    "severity": [],
+    "paymentMethod": [],
+    "policyType": []
+  },
+  "search": ""
+}
+Valid values:
+- status (exceptions): OPEN, INVESTIGATING, RESOLVED, ESCALATED
+- type (exceptions): UNDERPAYMENT, OVERPAYMENT, MISSING_PAYMENT, DUPLICATE_PAYMENT, LATE_PAYMENT, PAYMENT_FAILED
+- severity: LOW, MEDIUM, HIGH, CRITICAL
+- Only include filter arrays that are relevant. Empty arrays = no filter.`;
+    let filters;
+    try {
+        const aiResponse = await (0, ai_service_1.callAI)(SEARCH_SYSTEM, query.trim(), true);
+        filters = JSON.parse(aiResponse);
+    }
+    catch {
+        // Fallback: basic keyword parsing
+        const q = query.toLowerCase();
+        filters = {
+            entity: 'exceptions',
+            filters: {
+                status: q.includes('unresolved') || q.includes('open')
+                    ? ['OPEN', 'INVESTIGATING']
+                    : q.includes('resolved')
+                        ? ['RESOLVED']
+                        : [],
+                severity: q.includes('critical')
+                    ? ['CRITICAL']
+                    : q.includes('high')
+                        ? ['HIGH']
+                        : [],
+                type: q.includes('underpayment')
+                    ? ['UNDERPAYMENT']
+                    : q.includes('overpayment')
+                        ? ['OVERPAYMENT']
+                        : q.includes('missing')
+                            ? ['MISSING_PAYMENT']
+                            : [],
+            },
+            search: '',
+        };
+    }
+    (0, response_1.sendSuccess)(res, { query, filters });
+}
+//# sourceMappingURL=ai.controller.js.map
