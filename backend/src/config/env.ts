@@ -21,5 +21,6 @@ export const env = {
   OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct',
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
   OPENROUTER_MAX_TOKENS: parseInt(process.env.OPENROUTER_MAX_TOKENS || '1500', 10),
+  ML_SERVICE_URL: process.env.ML_SERVICE_URL || 'http://localhost:8000',
   IS_PRODUCTION: process.env.NODE_ENV === 'production',
 };

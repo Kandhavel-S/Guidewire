@@ -34,9 +34,26 @@ services:
       JWT_SECRET: super_secret_jwt_key_insureflow_2026
       JWT_EXPIRES_IN: 7d
       CORS_ORIGIN: http://localhost:3000
+      ML_SERVICE_URL: http://ml-service:8000
     depends_on:
       postgres:
         condition: service_healthy
+      ml-service:
+        condition: service_started
+
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: insureflow_ml_service
+    restart: always
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:

@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.io = void 0;
-require("dotenv/config");
+// dotenv is loaded by ./config/env on first import — do not import it again here
 const http_1 = __importDefault(require("http"));
 const socket_io_1 = require("socket.io");
 const app_1 = __importDefault(require("./app"));
@@ -60,7 +60,8 @@ async function start() {
             console.log(`🚀 Running on: http://localhost:${env_1.env.PORT}`);
             console.log(`🌍 Environment: ${env_1.env.NODE_ENV}`);
             console.log(`🔗 Frontend URL: ${env_1.env.FRONTEND_URL}`);
-            console.log(`🤖 AI Model: ${env_1.env.AI_MODEL}`);
+            console.log(`🤖 AI Provider: OpenRouter | Model: ${env_1.env.OPENROUTER_MODEL}`);
+            console.log(`🔑 AI Key set: ${env_1.env.OPENROUTER_API_KEY ? 'YES ✅' : 'NO ❌ (fallback mode)'}`);
             console.log(`💡 Health check: http://localhost:${env_1.env.PORT}/health`);
             console.log('');
         });

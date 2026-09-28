@@ -20,6 +20,7 @@ import { AIAssistant } from '@/components/ai/AIAssistant';
 import { formatINR, formatDate } from '@/lib/utils';
 import { aiApi } from '@/lib/api/ai';
 import { exceptionsApi } from '@/lib/api/exceptions';
+import { mlApi, MLPrediction } from '@/lib/api/ml';
 import { ExceptionStatus } from '@/types';
 
 export default function ExceptionDetailPage() {
@@ -40,6 +41,7 @@ export default function ExceptionDetailPage() {
 
   const [exceptionDetail, setExceptionDetail] = useState<any>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(true);
+  const [mlPredictions, setMlPredictions] = useState<MLPrediction[]>([]);
 
   const [noteText, setNoteText] = useState('');
   const [resolutionNote, setResolutionNote] = useState('');
@@ -80,6 +82,15 @@ export default function ExceptionDetailPage() {
       isMounted = false;
     };
   }, [exceptionId, exceptions]);
+
+  useEffect(() => {
+    if (!exceptionId) return;
+    mlApi.getExceptionPredictions(exceptionId).then((response) => {
+      if (response.success) setMlPredictions(response.data || []);
+    }).catch(() => {
+      setMlPredictions([]);
+    });
+  }, [exceptionId]);
 
   if (isLoadingDetail && !exceptionDetail) {
     return <LoadingState message="Loading payment exception details..." />;
@@ -267,6 +278,44 @@ export default function ExceptionDetailPage() {
             {formatINR(differenceAmount)}
           </div>
         </div>
+      </div>
+
+      <div className="p-6 rounded-xl border border-cyan-500/30 bg-slate-900 shadow-xs space-y-4">
+        <div className="flex items-center justify-between border-b border-cyan-500/20 pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider">ML Payment Analysis</h3>
+            <p className="text-[11px] text-slate-500 mt-1">Advisory assessment, not a financial determination.</p>
+          </div>
+          <span className="text-[10px] uppercase font-bold text-cyan-300">Model predictions</span>
+        </div>
+
+        {mlPredictions.length === 0 ? (
+          <p className="text-xs text-slate-500">ML analysis currently unavailable or has not been run for this exception.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {mlPredictions.map((prediction) => (
+              <div key={prediction.id} className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-200">
+                    {prediction.predictionType === 'PAYMENT_ANOMALY' ? 'Anomaly Detection' : 'Late Payment Risk'}
+                  </span>
+                  <span className={`px-2 py-1 rounded border text-[10px] font-bold ${
+                    prediction.riskLevel === 'HIGH'
+                      ? 'text-red-400 bg-red-500/10 border-red-500/30'
+                      : prediction.riskLevel === 'MEDIUM'
+                      ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                      : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                  }`}>{prediction.riskLevel} RISK</span>
+                </div>
+                <div className="text-2xl font-extrabold text-cyan-300">{(prediction.score * 100).toFixed(1)}%</div>
+                <div className="text-[11px] text-slate-400">
+                  {prediction.predictionType === 'PAYMENT_ANOMALY' ? 'Anomaly score' : 'Late payment probability'}
+                </div>
+                <div className="text-[11px] text-slate-500">{prediction.modelName} v{prediction.modelVersion} • {formatDate(prediction.createdAt)}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* AI Exception Analysis Display Panel */}

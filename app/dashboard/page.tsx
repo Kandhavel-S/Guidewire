@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -13,17 +13,26 @@ import {
   Building2,
   FileCheck2,
   XCircle,
+  BrainCircuit,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { KpiCard } from '@/components/ui/KpiCard';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { DashboardCharts } from '@/components/dashboard/DashboardCharts';
 import { formatINR, formatDate } from '@/lib/utils';
+import { mlApi, MLPrediction } from '@/lib/api/ml';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { invoices, payments, exceptions, currentUser, runReconciliation } = useAppStore();
   const [isRunningRecon, setIsRunningRecon] = useState(false);
+  const [mlPredictions, setMlPredictions] = useState<MLPrediction[]>([]);
+
+  useEffect(() => {
+    mlApi.getPredictions().then((response) => {
+      if (response.success) setMlPredictions(response.data || []);
+    }).catch(() => setMlPredictions([]));
+  }, []);
 
   // Dynamic KPI calculations from store state
   const totalExpected = invoices.reduce((sum, i) => sum + i.expectedAmount, 0);
@@ -123,6 +132,24 @@ export default function DashboardPage() {
           variant="danger"
           trend={{ value: '3.2%', isPositive: false }}
         />
+      </div>
+
+      <div className="p-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 dark:bg-slate-900 shadow-xs">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BrainCircuit className="w-5 h-5 text-cyan-400" />
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">ML Insights</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Advisory predictions, separate from reconciliation results</p>
+            </div>
+          </div>
+          <Link href="/ml-insights" className="text-xs font-semibold text-cyan-400 hover:underline">View register</Link>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-4 text-xs">
+          <div><div className="text-lg font-bold text-white">{mlPredictions.length}</div><div className="text-slate-500">Analyzed</div></div>
+          <div><div className="text-lg font-bold text-red-400">{mlPredictions.filter((p) => p.riskLevel === 'HIGH').length}</div><div className="text-slate-500">High risk</div></div>
+          <div><div className="text-lg font-bold text-amber-400">{mlPredictions.filter((p) => p.predictionType === 'LATE_PAYMENT').length}</div><div className="text-slate-500">Late risk</div></div>
+        </div>
       </div>
 
       {/* Secondary Metric Cards */}

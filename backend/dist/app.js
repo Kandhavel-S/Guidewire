@@ -23,6 +23,7 @@ const dashboard_routes_1 = __importDefault(require("./modules/dashboard/dashboar
 const reports_routes_1 = __importDefault(require("./modules/reports/reports.routes"));
 const ai_routes_1 = __importDefault(require("./modules/ai/ai.routes"));
 const billingCenter_routes_1 = __importDefault(require("./mock-billing-center/billingCenter.routes"));
+const ml_routes_1 = __importDefault(require("./modules/ml/ml.routes"));
 const app = (0, express_1.default)();
 // ─────────────────────────────────────────────
 // Security Middleware
@@ -80,6 +81,7 @@ app.use('/api/dashboard', dashboard_routes_1.default);
 app.use('/api/reports', reports_routes_1.default);
 app.use('/api/ai', ai_routes_1.default);
 app.use('/api/mock-billing', billingCenter_routes_1.default);
+app.use('/api/ml', ml_routes_1.default);
 // ─────────────────────────────────────────────
 // Error Handling
 // ─────────────────────────────────────────────

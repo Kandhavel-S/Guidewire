@@ -138,6 +138,11 @@ enum AIMessageRole {
   ASSISTANT
 }
 
+enum MLPredictionType {
+  PAYMENT_ANOMALY
+  LATE_PAYMENT
+}
+
 // ─────────────────────────────────────────────
 // MODELS
 // ─────────────────────────────────────────────
@@ -266,6 +271,7 @@ model Payment {
   policy          Policy         @relation(fields: [policyId], references: [id], onDelete: Cascade)
   exceptions      PaymentException[]
   reconciliationRecords ReconciliationRecord[]
+  mlPredictions   MLPrediction[]
 
   @@map("payments")
 }
@@ -342,6 +348,7 @@ model PaymentException {
   aiAnalyses              AIAnalysis[]
   aiConversations         AIConversation[]
   reconciliationRecords   ReconciliationRecord[]
+  mlPredictions           MLPrediction[]
 
   @@map("payment_exceptions")
 }
@@ -406,6 +413,27 @@ model AIAnalysis {
   exception    PaymentException @relation(fields: [exceptionId], references: [id], onDelete: Cascade)
 
   @@map("ai_analyses")
+}
+
+model MLPrediction {
+  id             String           @id @default(cuid())
+  paymentId      String?
+  exceptionId    String?
+  predictionType MLPredictionType
+  modelName      String
+  modelVersion   String
+  score          Float
+  riskLevel      String
+  prediction     Boolean?
+  features       Json?
+  createdAt      DateTime         @default(now())
+
+  payment        Payment?         @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  exception      PaymentException? @relation(fields: [exceptionId], references: [id], onDelete: SetNull)
+
+  @@index([predictionType, createdAt])
+  @@index([riskLevel, createdAt])
+  @@map("ml_predictions")
 }
 
 model AIConversation {

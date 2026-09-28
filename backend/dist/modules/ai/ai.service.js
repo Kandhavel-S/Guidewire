@@ -11,18 +11,24 @@ const openai_1 = __importDefault(require("openai"));
 const env_1 = require("../../config/env");
 let client = null;
 function getAIClient() {
-    if (!env_1.env.AI_API_KEY || env_1.env.AI_API_KEY === 'your-api-key-here') {
+    if (!env_1.env.OPENROUTER_API_KEY || env_1.env.OPENROUTER_API_KEY === 'your-openrouter-api-key-here') {
         return null;
     }
     if (!client) {
+        // OpenRouter uses the same OpenAI SDK, but with its own baseURL and two
+        // required attribution headers (HTTP-Referer and X-Title).
         client = new openai_1.default({
-            apiKey: env_1.env.AI_API_KEY,
-            baseURL: env_1.env.AI_BASE_URL,
+            apiKey: env_1.env.OPENROUTER_API_KEY,
+            baseURL: env_1.env.OPENROUTER_BASE_URL,
+            defaultHeaders: {
+                'HTTP-Referer': env_1.env.FRONTEND_URL, // your site URL
+                'X-Title': 'InsureFlow', // your app name
+            },
         });
     }
     return client;
 }
-exports.AI_MODEL = env_1.env.AI_MODEL;
+exports.AI_MODEL = env_1.env.OPENROUTER_MODEL;
 // Fallback analysis when AI is unavailable — deterministic, data-driven
 function generateFallbackAnalysis(exceptionData) {
     const { type, expectedAmount, actualAmount, difference, customerName, policyNumber } = exceptionData;
@@ -135,17 +141,36 @@ function generateFallbackAnalysis(exceptionData) {
 async function callAI(systemPrompt, userPrompt, expectJSON = false) {
     const aiClient = getAIClient();
     if (!aiClient) {
+        console.log('[AI] No API key configured — using fallback mode.');
         throw new Error('AI_UNAVAILABLE');
     }
-    const response = await aiClient.chat.completions.create({
-        model: exports.AI_MODEL,
-        messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.3,
-        response_format: expectJSON ? { type: 'json_object' } : undefined,
-    });
-    return response.choices[0]?.message?.content || '';
+    // Append a JSON instruction to the system prompt instead of using
+    // response_format: json_object, since many OpenRouter models don't support it.
+    const finalSystemPrompt = expectJSON
+        ? `${systemPrompt}\n\nIMPORTANT: Respond with valid JSON only. No markdown, no code fences, no extra text.`
+        : systemPrompt;
+    try {
+        console.log(`[AI] Calling OpenRouter model: ${exports.AI_MODEL} (max_tokens: ${env_1.env.OPENROUTER_MAX_TOKENS})`);
+        const response = await aiClient.chat.completions.create({
+            model: exports.AI_MODEL,
+            messages: [
+                { role: 'system', content: finalSystemPrompt },
+                { role: 'user', content: userPrompt },
+            ],
+            temperature: 0.3,
+            max_tokens: env_1.env.OPENROUTER_MAX_TOKENS,
+        });
+        const content = response.choices[0]?.message?.content || '';
+        console.log(`[AI] Response received (${content.length} chars).`);
+        return content;
+    }
+    catch (error) {
+        // Surface the real error so it appears in the backend terminal
+        console.error('[AI] OpenRouter API error:', error?.message || error);
+        if (error?.status) {
+            console.error(`[AI] HTTP status: ${error.status} | Code: ${error?.error?.code}`);
+        }
+        throw error;
+    }
 }
 //# sourceMappingURL=ai.service.js.map

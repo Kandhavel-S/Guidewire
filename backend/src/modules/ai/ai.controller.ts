@@ -39,6 +39,10 @@ export async function analyzeException(req: AuthRequest, res: Response): Promise
         take: 3,
         include: { user: { select: { name: true } } },
       },
+      mlPredictions: {
+        orderBy: { createdAt: 'desc' },
+        take: 4,
+      },
     },
   });
 
@@ -88,6 +92,14 @@ export async function analyzeException(req: AuthRequest, res: Response): Promise
     severity: exc.severity,
     status: exc.status,
     notes: exc.notes.map((n: any) => `${n.user.name}: ${n.content}`),
+    mlPredictions: exc.mlPredictions.map((prediction: any) => ({
+      type: prediction.predictionType,
+      model: prediction.modelName,
+      modelVersion: prediction.modelVersion,
+      score: prediction.score,
+      riskLevel: prediction.riskLevel,
+      features: prediction.features,
+    })),
   };
 
   let analysis: ExceptionAnalysisResponse;

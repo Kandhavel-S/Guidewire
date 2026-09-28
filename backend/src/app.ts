@@ -20,6 +20,7 @@ import dashboardRoutes from './modules/dashboard/dashboard.routes';
 import reportsRoutes from './modules/reports/reports.routes';
 import aiRoutes from './modules/ai/ai.routes';
 import billingCenterRoutes from './mock-billing-center/billingCenter.routes';
+import mlRoutes from './modules/ml/ml.routes';
 
 const app = express();
 
@@ -95,6 +96,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/mock-billing', billingCenterRoutes);
+app.use('/api/ml', mlRoutes);
 
 // ─────────────────────────────────────────────
 // Error Handling
